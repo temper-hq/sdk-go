@@ -52,6 +52,38 @@ func (s *SecretsService) DeleteForEnvironment(ctx context.Context, environmentID
 	return s.c.do(ctx, request{method: "DELETE", path: envPath(environmentID, "/secrets/"+seg(name))}, nil)
 }
 
+// GetEgressMode returns the developer-level egress mode (EgressAllowlist, EgressOpen or EgressAsk), used by every
+// environment without its own.
+func (s *SecretsService) GetEgressMode(ctx context.Context) (string, error) {
+	var out struct {
+		Mode string `json:"mode"`
+	}
+	return out.Mode, s.c.do(ctx, request{method: "GET", path: "/v1/egress"}, &out)
+}
+
+// SetEgressMode sets what happens to hosts outside the allowlist for every environment without its own mode.
+func (s *SecretsService) SetEgressMode(ctx context.Context, mode string) (string, error) {
+	var out struct {
+		Mode string `json:"mode"`
+	}
+	return out.Mode, s.c.do(ctx, request{method: "PUT", path: "/v1/egress", json: map[string]any{"mode": mode}}, &out)
+}
+
+// SetEgressHook sets (or with nil removes) the endpoint that EgressHook mode asks before a host outside the
+// allowlist is allowed.
+func (s *SecretsService) SetEgressHook(ctx context.Context, hook *EgressHookSettings) (*EgressHookSettings, error) {
+	var out struct {
+		Hook *EgressHookSettings `json:"hook"`
+	}
+	return out.Hook, s.c.do(ctx, request{method: "PUT", path: "/v1/egress", json: map[string]any{"hook": hook}}, &out)
+}
+
+// SetEnvironmentEgressMode sets the environment's own egress mode; nil reverts to the developer-level one.
+func (s *SecretsService) SetEnvironmentEgressMode(ctx context.Context, environmentID string, mode *string) (*EnvironmentEgress, error) {
+	var out EnvironmentEgress
+	return &out, s.c.do(ctx, request{method: "PUT", path: envPath(environmentID, "/egress"), json: map[string]any{"mode": mode}}, &out)
+}
+
 // GetEgress returns the developer-level egress allowlist (used by every environment without its own allowlist).
 func (s *SecretsService) GetEgress(ctx context.Context) ([]string, error) {
 	var out struct {

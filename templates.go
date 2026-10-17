@@ -97,8 +97,14 @@ func (s *TemplateStart) UnmarshalJSON(b []byte) error {
 type CreateTemplateVersionParams struct {
 	// From is a base version as "name:version" (one of yours, and ready); empty = the platform's default runtime.
 	From string `json:"from,omitempty"`
-	// Steps are 1-64 build steps, run in order.
-	Steps []TemplateStep `json:"steps"`
+	// FromImage starts from a public OCI image instead of From ("python:3.12-slim", "ghcr.io/org/app:1.0"); the build pulls
+	// it and uses it as the whole root filesystem.
+	FromImage string `json:"from_image,omitempty"`
+	// RegistrySecret names the developer-level secret with the login for a private FromImage (base64(user:password),
+	// prefix "Basic "); the login never enters the build VM.
+	RegistrySecret string `json:"registry_secret,omitempty"`
+	// Steps are up to 64 build steps, run in order; at least one unless FromImage is set.
+	Steps []TemplateStep `json:"steps,omitempty"`
 	Start *TemplateStart `json:"start,omitempty"`
 }
 
@@ -106,8 +112,14 @@ type CreateTemplateVersionParams struct {
 type TemplateVersion struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
-	// From is the base version ("name:version"); nil = the platform's default runtime.
+	// From is the base version ("name:version"); nil = the platform's default runtime or an OCI image (FromImage).
 	From *string `json:"from"`
+	// FromImage is the base OCI image, normalised ("docker.io/library/python:3.12-slim"); empty unless the version starts from an image.
+	FromImage string `json:"from_image,omitempty"`
+	// ImageDigest is the image manifest the build pulled ("sha256:..."), once the import has run.
+	ImageDigest string `json:"image_digest,omitempty"`
+	// RegistrySecret is the secret used to pull a private FromImage.
+	RegistrySecret string `json:"registry_secret,omitempty"`
 	// State is building, ready or failed.
 	State string `json:"state"`
 	// Error says why the build failed.

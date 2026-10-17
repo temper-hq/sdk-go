@@ -17,7 +17,7 @@ import (
 const DefaultBaseURL = "https://api.temper.im"
 
 // Version is the SDK version. It matches info.version in the Temper API spec.
-const Version = "0.5.0"
+const Version = "0.6.0"
 
 const (
 	defaultTimeout = 30 * time.Second

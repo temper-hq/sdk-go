@@ -125,6 +125,42 @@ func (s *EnvironmentsService) Suspend(ctx context.Context, id string) (*Environm
 	return s.action(ctx, id, "suspend", nil)
 }
 
+// CreateSnapshot snapshots the data disk (/workspace) without stopping the environment. It is returned pending and
+// becomes ready once the host has taken it (about a second); a running environment's /workspace is frozen for that
+// moment.
+func (s *EnvironmentsService) CreateSnapshot(ctx context.Context, id string, p CreateSnapshotParams) (*Snapshot, error) {
+	var out Snapshot
+	return &out, s.c.do(ctx, request{method: "POST", path: envPath(id, "/snapshots"), json: p}, &out)
+}
+
+// ListSnapshots returns the environment's snapshots, newest first.
+func (s *EnvironmentsService) ListSnapshots(ctx context.Context, id string) ([]Snapshot, error) {
+	var out struct {
+		Data []Snapshot `json:"data"`
+	}
+	return out.Data, s.c.do(ctx, request{method: "GET", path: envPath(id, "/snapshots")}, &out)
+}
+
+// GetSnapshot returns one snapshot.
+func (s *EnvironmentsService) GetSnapshot(ctx context.Context, id, snapshotID string) (*Snapshot, error) {
+	var out Snapshot
+	return &out, s.c.do(ctx, request{method: "GET", path: envPath(id, "/snapshots/"+seg(snapshotID))}, &out)
+}
+
+// DeleteSnapshot deletes a snapshot (deleting until the host has removed it). Environments branched from it are
+// not affected.
+func (s *EnvironmentsService) DeleteSnapshot(ctx context.Context, id, snapshotID string) (*Snapshot, error) {
+	var out Snapshot
+	return &out, s.c.do(ctx, request{method: "DELETE", path: envPath(id, "/snapshots/"+seg(snapshotID))}, &out)
+}
+
+// Restore restores the data disk to a snapshot: the VM is shut down, the disk swapped and the VM cold-started (the
+// in-memory state is lost). With keepCurrent the current disk is kept as a snapshot first. Restoring stays true
+// until the host has finished.
+func (s *EnvironmentsService) Restore(ctx context.Context, id, snapshotID string, keepCurrent bool) (*Environment, error) {
+	return s.action(ctx, id, "restore", map[string]any{"snapshot_id": snapshotID, "keep_current": keepCurrent})
+}
+
 // Resume brings the environment back to running (without recording activity). It returns limit_exceeded if a
 // usage limit has been exceeded.
 func (s *EnvironmentsService) Resume(ctx context.Context, id string) (*Environment, error) {
@@ -153,6 +189,14 @@ func (s *EnvironmentsService) Destroy(ctx context.Context, id string) (*Environm
 func (s *EnvironmentsService) UpdateIdle(ctx context.Context, id string, p IdleSettings) (*Environment, error) {
 	var out Environment
 	return &out, s.c.do(ctx, request{method: "PATCH", path: envPath(id, "/idle"), json: p}, &out)
+}
+
+// AgentLogs returns the Agent's recent output (the runtime keeps the last 8 MiB since the VM started) and its state.
+// Wakes a suspended environment, like exec.
+func (s *EnvironmentsService) AgentLogs(ctx context.Context, id string, p AgentLogsParams) (*AgentLogs, error) {
+	var out AgentLogs
+	query := newQuery().int64("since", p.Since).int("limit", p.Limit).values()
+	return &out, s.c.do(ctx, request{method: "GET", path: envPath(id, "/agent/logs"), query: query}, &out)
 }
 
 // Events returns a page of environment events in chronological order. Destroyed environments can be queried too.
@@ -252,4 +296,33 @@ func (s *EnvironmentsService) CancelSchedule(ctx context.Context, id, scheduleID
 func (s *EnvironmentsService) UpdateAgentSettings(ctx context.Context, id string, p AgentSettingsPatch) (*AgentSettings, error) {
 	var out AgentSettings
 	return &out, s.c.do(ctx, request{method: "PATCH", path: envPath(id, "/agent"), json: p}, &out)
+}
+
+// ListIngressRoutes returns the ingress routes (public HTTPS address → a port inside the VM), yours and the
+// agent's, plus the environment's public hostname.
+func (s *EnvironmentsService) ListIngressRoutes(ctx context.Context, id string) (*IngressRouteList, error) {
+	var out IngressRouteList
+	return &out, s.c.do(ctx, request{method: "GET", path: envPath(id, "/ingress/routes")}, &out)
+}
+
+// SetIngressRoute registers (or replaces) an ingress route: requests to https://<host><path> are verified, stored,
+// answered, then delivered to the port inside the VM (waking it first). The secret never enters the VM.
+func (s *EnvironmentsService) SetIngressRoute(ctx context.Context, id, key string, p IngressRouteSpec) (*IngressRoute, error) {
+	var out IngressRoute
+	return &out, s.c.do(ctx, request{method: "PUT", path: envPath(id, "/ingress/routes/"+seg(key)), json: p}, &out)
+}
+
+// DeleteIngressRoute deletes an ingress route (including one the agent registered).
+func (s *EnvironmentsService) DeleteIngressRoute(ctx context.Context, id, key string) error {
+	return s.c.do(ctx, request{method: "DELETE", path: envPath(id, "/ingress/routes/"+seg(key))}, nil)
+}
+
+// ListIngressDeliveries returns recent ingress requests (newest first, at most limit; 0 = the default 50) and
+// whether they reached the VM. Bodies are not included.
+func (s *EnvironmentsService) ListIngressDeliveries(ctx context.Context, id string, limit int) ([]IngressDelivery, error) {
+	var out struct {
+		Data []IngressDelivery `json:"data"`
+	}
+	query := newQuery().int("limit", limit).values()
+	return out.Data, s.c.do(ctx, request{method: "GET", path: envPath(id, "/ingress/deliveries"), query: query}, &out)
 }

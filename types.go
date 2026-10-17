@@ -42,6 +42,11 @@ type Environment struct {
 	OverLimit *string   `json:"over_limit"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// SourceSnapshotID and SourceEnvironmentID are set for an environment branched from a snapshot (FromSnapshot).
+	SourceSnapshotID    *string `json:"source_snapshot_id"`
+	SourceEnvironmentID *string `json:"source_environment_id"`
+	// Restoring is true until a restore to a snapshot has finished.
+	Restoring bool `json:"restoring"`
 }
 
 // ResourcesInput is the resources requested when creating an environment; fields left zero use server defaults.
@@ -76,6 +81,10 @@ type CreateEnvironmentParams struct {
 	EgressAllow []string `json:"egress_allow,omitempty"`
 	// Template is a template version as "name:version" (it must be ready); empty = the platform's default runtime.
 	Template string `json:"template,omitempty"`
+	// FromSnapshot branches: the new environment's data disk is a copy of this ready snapshot. Fields left empty take
+	// the source environment's current values (Agent version, resources, env and files, egress, template); secrets
+	// and idle settings are not copied. CreateBatch doesn't support it.
+	FromSnapshot string `json:"from_snapshot,omitempty"`
 	// IdempotencyKey (1–255 visible ASCII characters) is sent as the Idempotency-Key header. Only Create uses it;
 	// CreateBatch doesn't.
 	IdempotencyKey string `json:"-"`
@@ -129,6 +138,33 @@ type EnvironmentEvent struct {
 }
 
 // EventList is a page of environment events. When Next is non-nil, pass it back as After.
+// AgentStatus is how the Agent is doing: State is starting, running, no_entry (no Agent package and no template start
+// command) or exited (exited with 0, not restarted).
+type AgentStatus struct {
+	State    string `json:"state"`
+	Restarts int    `json:"restarts"`
+	LastExit *struct {
+		Code   *int `json:"code,omitempty"`
+		Signal *int `json:"signal,omitempty"`
+	} `json:"last_exit,omitempty"`
+}
+
+// AgentLogs is a slice of the Agent's output (stdout and stderr together) starting at byte Start; pass Next as Since to
+// continue. Truncated means output between Since and Start was already dropped (the runtime keeps the last 8 MiB).
+type AgentLogs struct {
+	Start     int64       `json:"start"`
+	Next      int64       `json:"next"`
+	Truncated bool        `json:"truncated"`
+	Output    string      `json:"output"`
+	Agent     AgentStatus `json:"agent"`
+}
+
+// AgentLogsParams are the parameters of EnvironmentsService.AgentLogs. Limit 0 = 1 MiB.
+type AgentLogsParams struct {
+	Since int64
+	Limit int
+}
+
 type EventList struct {
 	Data []EnvironmentEvent `json:"data"`
 	Next *int64             `json:"next"`
@@ -484,6 +520,11 @@ type UsageTotals struct {
 	StorageGiBHours float64 `json:"storage_gib_hours"`
 	EgressGiB       float64 `json:"egress_gib"`
 	BrowserHours    float64 `json:"browser_hours"`
+	// Snapshots taken, environments branched from snapshots, and GiB × hours held only by snapshots (not counted
+	// in StorageGiBHours). These are metered but no limits can be set on them.
+	Snapshots        float64 `json:"snapshots"`
+	Forks            float64 `json:"forks"`
+	SnapshotGiBHours float64 `json:"snapshot_gib_hours"`
 }
 
 // EnvironmentUsage is one environment's usage.
@@ -572,6 +613,112 @@ type Schedule struct {
 	LastFiredAt *time.Time `json:"last_fired_at"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+// IngressVerify says how requests to an ingress route are checked at the edge. Kind is none, standard_webhooks,
+// slack, telegram or stripe. The secret is given once and never returned.
+type IngressVerify struct {
+	Kind   string `json:"kind,omitempty"`
+	Secret string `json:"secret,omitempty"`
+}
+
+// IngressRespond is what the sender gets. Forward = the VM's own response (synchronous); otherwise an immediate
+// 2xx with Status (default 200), Body and ContentType, sent before delivery.
+type IngressRespond struct {
+	Forward     bool
+	Status      int
+	Body        string
+	ContentType string
+}
+
+func (r IngressRespond) MarshalJSON() ([]byte, error) {
+	if r.Forward {
+		return json.Marshal("forward")
+	}
+	out := map[string]any{}
+	if r.Status != 0 {
+		out["status"] = r.Status
+	}
+	if r.Body != "" {
+		out["body"] = r.Body
+	}
+	if r.ContentType != "" {
+		out["content_type"] = r.ContentType
+	}
+	return json.Marshal(out)
+}
+
+func (r *IngressRespond) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		*r = IngressRespond{Forward: s == "forward"}
+		return nil
+	}
+	var o struct {
+		Status      int    `json:"status"`
+		Body        string `json:"body"`
+		ContentType string `json:"content_type"`
+	}
+	if err := json.Unmarshal(b, &o); err != nil {
+		return err
+	}
+	*r = IngressRespond{Status: o.Status, Body: o.Body, ContentType: o.ContentType}
+	return nil
+}
+
+// IngressDeliver is where an ingress request goes inside the VM: a TCP port a program in the runtime unit listens
+// on, and optionally a path (defaults to the public path; the query string is passed through either way).
+type IngressDeliver struct {
+	Port int     `json:"port"`
+	Path *string `json:"path,omitempty"`
+}
+
+// IngressRouteSpec registers an ingress route. Path is the public path (starting with "/", matched exactly).
+type IngressRouteSpec struct {
+	Path    string          `json:"path"`
+	Verify  *IngressVerify  `json:"verify,omitempty"`
+	Respond *IngressRespond `json:"respond,omitempty"`
+	Deliver IngressDeliver  `json:"deliver"`
+}
+
+// IngressRoute is a registered ingress route (the secret is never included).
+type IngressRoute struct {
+	Key string `json:"key"`
+	// Source is agent or developer.
+	Source string `json:"source"`
+	Path   string `json:"path"`
+	// URL is the public address; nil when the control plane has no ingress domain.
+	URL    *string `json:"url"`
+	Verify struct {
+		Kind string `json:"kind"`
+	} `json:"verify"`
+	Respond   IngressRespond `json:"respond"`
+	Deliver   IngressDeliver `json:"deliver"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	// Secret is set only when the platform generated it (standard_webhooks without a secret); shown once.
+	Secret *string `json:"secret,omitempty"`
+}
+
+// IngressRouteList is an environment's routes plus its public hostname (nil without an ingress domain).
+type IngressRouteList struct {
+	Data []IngressRoute `json:"data"`
+	Host *string        `json:"host"`
+}
+
+// IngressDelivery is one received ingress request and whether it reached the VM.
+type IngressDelivery struct {
+	ID          string     `json:"id"`
+	RouteKey    string     `json:"route_key"`
+	EventID     *string    `json:"event_id"`
+	Method      string     `json:"method"`
+	Path        string     `json:"path"`
+	ReceivedAt  time.Time  `json:"received_at"`
+	Attempts    int        `json:"attempts"`
+	DeliveredAt *time.Time `json:"delivered_at"`
+	GaveUpAt    *time.Time `json:"gave_up_at"`
+	LastStatus  *int       `json:"last_status"`
+	LastError   *string    `json:"last_error"`
 }
 
 // AgentSettings are the agent's quotas for registering its own schedules and keeping the environment awake.
@@ -743,15 +890,9 @@ type Member struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// Team is a team (developer) that an account can access.
-type Team struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Role string `json:"role"`
-}
-
 // Me is the current identity.
 type Me struct {
+	// Developer is the API key's project (dev_...); the name is kept for existing code.
 	Developer struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
@@ -760,8 +901,15 @@ type Me struct {
 	Member *Member `json:"member"`
 	// Auth is session or api_key.
 	Auth string `json:"auth"`
-	// Developers is set only for console sessions.
-	Developers []Team `json:"developers,omitempty"`
+	// Organization is the organization the project belongs to.
+	Organization *Organization `json:"organization,omitempty"`
+}
+
+// Organization is the organization a project belongs to.
+type Organization struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Slug string `json:"slug"`
 }
 
 // APIKey is an API key record (without the key itself, except right after it is issued).
@@ -830,4 +978,56 @@ type EnvironmentEgress struct {
 	Allow []string `json:"allow"`
 	// Inherited is true if the environment has no allowlist of its own and uses the developer-level one.
 	Inherited bool `json:"inherited"`
+	// Mode is allowlist, open or ask (what happens to hosts outside the allowlist).
+	Mode string `json:"mode"`
+	// ModeInherited is true if the environment has no mode of its own and uses the developer-level one.
+	ModeInherited bool `json:"mode_inherited"`
+}
+
+// Egress modes: what happens to a host outside the allowlist.
+const (
+	// EgressAllowlist refuses the connection (the default).
+	EgressAllowlist = "allowlist"
+	// EgressOpen allows and audits it (private networks and metadata addresses are still blocked).
+	EgressOpen = "open"
+	// EgressAsk holds the connection while an approval (connector "egress:<host>", category "connect") is requested.
+	EgressAsk = "ask"
+	// EgressHook asks the developer's hook endpoint first (see EgressHookSettings); allow and deny are final, ask goes
+	// on to the approval flow.
+	EgressHook = "hook"
+)
+
+// EgressHookSettings is the endpoint EgressHook mode asks: Temper POSTs {environment_id, end_user_id, host, port, summary}
+// signed like a webhook (a webhook URL must be set first) and expects {"decision": "allow" | "deny" | "ask"}.
+type EgressHookSettings struct {
+	URL string `json:"url"`
+	// OnError is deny (default) or ask: what a timeout, an error status or an unrecognised answer means.
+	OnError string `json:"on_error,omitempty"`
+}
+
+// Snapshot is a snapshot of an environment's data disk (/workspace). Memory and settings are not part of it.
+type Snapshot struct {
+	ID            string  `json:"id"`
+	EnvironmentID string  `json:"environment_id"`
+	Name          *string `json:"name"`
+	// State is pending, ready, failed, deleting or lost (the host holding it was lost).
+	State string `json:"state"`
+	// Consistency is clean (taken while stopped), filesystem (taken while running with /workspace frozen) or crash
+	// (like a power cut); nil until ready.
+	Consistency *string `json:"consistency"`
+	// SizeBytes is what only this snapshot holds (what deleting it would free); updated every few minutes.
+	SizeBytes    *int64     `json:"size_bytes"`
+	AgentVersion *string    `json:"agent_version"`
+	Template     *string    `json:"template"`
+	Error        *string    `json:"error"`
+	CreatedAt    time.Time  `json:"created_at"`
+	TakenAt      *time.Time `json:"taken_at"`
+	// ExpiresAt is when it is deleted automatically; nil = kept until deleted.
+	ExpiresAt *time.Time `json:"expires_at"`
+}
+
+// CreateSnapshotParams names a snapshot (unique per environment) and sets when it expires (in the future).
+type CreateSnapshotParams struct {
+	Name      string     `json:"name,omitempty"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }

@@ -49,7 +49,7 @@ webhooks, audit and usage), see the [docs](https://docs.temper.im/).
 
 | Field | Methods |
 | --- | --- |
-| `Environments` | `Create`, `CreateBatch`, `Get`, `GetConfig`, `SetConfig`, `WaitFor`, `List`, `Iter`, `Suspend`, `Resume`, `Wake`, `KeepAwake`, `Destroy`, `UpdateIdle`, `Events`, `IterEvents`, `Exec`, `CreateWakeup`, `ListWakeups`, `CancelWakeup`, `ListSchedules`, `CancelSchedule`, `UpdateAgentSettings` |
+| `Environments` | `Create`, `CreateBatch`, `Get`, `GetConfig`, `SetConfig`, `WaitFor`, `List`, `Iter`, `Suspend`, `Resume`, `Wake`, `KeepAwake`, `Destroy`, `UpdateIdle`, `Events`, `IterEvents`, `Exec`, `CreateWakeup`, `ListWakeups`, `CancelWakeup`, `ListSchedules`, `CancelSchedule`, `UpdateAgentSettings`, `AgentLogs`, `ListIngressRoutes`, `SetIngressRoute`, `DeleteIngressRoute`, `ListIngressDeliveries`, `CreateSnapshot`, `ListSnapshots`, `GetSnapshot`, `DeleteSnapshot`, `Restore` |
 | `Files` | `Open` (stream), `Read`, `Write` (`io.Reader`, streamed upload), `List`, `Delete` |
 | `Processes` | `Spawn`, `List`, `Get`, `Output` (long polling), `Follow`, `Signal`, `Delete` |
 | `Connections` | `Authorize`, `List`, `Get`, `Revoke`, `ListOAuthClients`, `SetOAuthClient` |
@@ -59,7 +59,7 @@ webhooks, audit and usage), see the [docs](https://docs.temper.im/).
 | `Metering` | `Usage`, `ListLimits`, `SetLimit`, `DeleteLimit` |
 | `Agent` | `UploadPackage` (`io.Reader`, streamed; also reports whether the package was newly created), `ListPackages`, `SetDefaultVersion`, `StartRollout`, `ListRollouts`, `GetRollout`, `WidenRollout`, `PauseRollout`, `ResumeRollout`, `RollbackRollout` |
 | `Browser` | `CreateProfile`, `ListProfiles`, `GetProfile`, `DeleteProfile`, `AcquireLease`, `ListLeases`, `IterLeases`, `GetLease`, `RenewLease`, `ReleaseLease`, `Takeover`, `Handback`, `Limits` |
-| `Secrets` | `List`, `Set`, `Delete`, `ListForEnvironment`, `SetForEnvironment`, `DeleteForEnvironment` (credentials: values are never returned, and the VM only sees a placeholder); `GetEgress`, `SetEgress`, `GetEnvironmentEgress`, `SetEnvironmentEgress`, `AddEnvironmentEgressHost`, `RemoveEnvironmentEgressHost` (egress allowlist) |
+| `Secrets` | `List`, `Set`, `Delete`, `ListForEnvironment`, `SetForEnvironment`, `DeleteForEnvironment` (credentials: values are never returned, and the VM only sees a placeholder); `GetEgress`, `SetEgress`, `GetEnvironmentEgress`, `SetEnvironmentEgress`, `AddEnvironmentEgressHost`, `RemoveEnvironmentEgressHost` (egress allowlist); `GetEgressMode`, `SetEgressMode`, `SetEgressHook`, `SetEnvironmentEgressMode` (what happens to hosts outside the allowlist) |
 | `Team` | `Me`, `ListMembers`, `AddMember`, `SetMemberRole`, `RemoveMember`, `ListAPIKeys`, `CreateAPIKey`, `RevokeAPIKey`, `GetWebhook`, `SetWebhook` (adding, changing or removing members, issuing keys and changing the webhook require a console session; calling them with an API key returns `session_required`) |
 | `Templates` | `CreateVersion`, `GetVersion`, `List`, `DeleteVersion`, `WaitForVersion`; step helpers `RunStep`, `EnvStep`, `WorkdirStep`, `CopyStep`, `CopyBytes`, `StartShell`, `StartArgv` |
 | Functions | `VerifyWebhook`, `SignWebhook`, `IsCode`, `Ptr` |

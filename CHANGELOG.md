@@ -3,6 +3,37 @@
 Go SDK (module `github.com/temper-hq/sdk-go`, package `temper`). Versions follow the API spec's `info.version` (`temper.Version`).
 Before 1.0, minor versions may include breaking changes; they are noted here.
 
+## 0.6.0 — 2026-10-18
+
+Added:
+
+- Ingress: every environment has a public HTTPS address (`IngressRouteList.Host`). `Environments.ListIngressRoutes`,
+  `SetIngressRoute` and `DeleteIngressRoute` manage the routes on it (`IngressRouteSpec`: path, verification by Standard
+  Webhooks, Slack, Telegram or Stripe signature, an immediate response or `IngressRespond{Forward: true}`, and the port
+  inside the VM to deliver to); a request wakes the environment and is retried for 24 hours.
+  `Environments.ListIngressDeliveries` lists recent requests and their delivery state. When a Standard Webhooks route is
+  registered without a secret the platform generates one and returns it once in `IngressRoute.Secret`.
+- Egress modes: `Secrets.GetEgressMode` / `SetEgressMode` (developer level) and `SetEnvironmentEgressMode` decide what
+  happens to hosts outside the allowlist: `EgressAllowlist` (refuse, the default), `EgressOpen` (allow and audit),
+  `EgressAsk` (hold the connection while an approval with connector `egress:<host>` and category `connect` is requested;
+  a permanent approval adds the host to the environment's allowlist) or `EgressHook` (ask the endpoint set with
+  `Secrets.SetEgressHook` first). `EnvironmentEgress` has `Mode` and `ModeInherited`.
+- Templates: `CreateTemplateVersionParams.FromImage` starts a version from an OCI image instead of a base template, and
+  `RegistrySecret` names the developer-level secret used to pull a private one; `TemplateVersion` has `FromImage`,
+  `RegistrySecret` and `ImageDigest`.
+- `Environments.AgentLogs` returns a slice of the Agent's output together with its state (`AgentStatus`: state, restarts,
+  last exit); pass `Next` back as `Since` to follow it.
+- Snapshots of an environment's data disk: `Environments.CreateSnapshot`, `ListSnapshots`, `GetSnapshot`,
+  `DeleteSnapshot`, and `Environments.Restore` to roll the disk back to one. `CreateEnvironmentParams.FromSnapshot` branches
+  a new environment from a snapshot. `Environment` has `SourceSnapshotID`, `SourceEnvironmentID` and `Restoring`;
+  `UsageTotals` has `Snapshots`, `Forks` and `SnapshotGiBHours`.
+
+Breaking:
+
+- `Me.Developers` and the `Team` type are gone: a console session now identifies a person, not a team, so there is no team list
+  to switch between. `Me.Organization` (`ID`, `Name`, `Slug`) is the organization the API key's project belongs to.
+  `Me.Developer` is still the key's project.
+
 ## 0.5.0 — 2026-10-11
 
 First release of the Go SDK. It covers the same API as the TypeScript and Python SDKs, except WebSocket attach for
